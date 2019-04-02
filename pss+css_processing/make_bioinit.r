@@ -14,8 +14,6 @@
 # more:  http://dx.doi.org/10.3334/ORNLDAAC/990                                            #
 #------------------------------------------------------------------------------------------#
 
-
-
 #----- Leave this as the first command, this will reset your R session. -------------------#
 rm(list=ls())
 options(warn=0)
@@ -23,7 +21,7 @@ gc()
 graphics.off()
 #------------------------------------------------------------------------------------------#
 
-
+IED_INIT_MODE = 6 # ED2 input file 3 or 6
 
 #==========================================================================================#
 #==========================================================================================#
@@ -39,21 +37,22 @@ graphics.off()
 #------------------------------------------------------------------------------------------#
 #     Set paths.                                                                           #
 #------------------------------------------------------------------------------------------#
-here    = getwd()                 # Current path 
+here    =  "/home/femeunier/Documents/R/ED2_Support_Files/pss+css_processing"              # Current path 
+there   = '/home/femeunier/Documents/data/BCI' # Census path
 outpath = file.path(here,"sites") # Path where the output should be written
 #------------------------------------------------------------------------------------------#
 
-
+setwd(here)
 
 #------------------------------------------------------------------------------------------#
 #     Location of interest.                                                                #
 #------------------------------------------------------------------------------------------#
-place      = "Santarem_Km83"   # Name of the site, for output directory
-census.csv = "s83_census.csv"  # Name of the csv file with the forest inventory data
-iata       = "s83"             # Tag for site (short name for output files)
-identity   = "default"         # Unique identification (in case you have multiple tests).
-lon        = -54.971           # Longitude of the site
-lat        =  -3.018           # Latitude of the site
+place      = "BCI"   # Name of the site, for output directory
+census.csv = "census_BCI_all.csv"  # Name of the csv file with the forest inventory data
+iata       = "BCI"             # Tag for site (short name for output files)
+identity   = "PFTs_nolianas"         # Unique identification (in case you have multiple tests).
+lon        = -79           # Longitude of the site
+lat        =  9           # Latitude of the site
 year.out   = 2000              # Year of measurements
 #------------------------------------------------------------------------------------------#
 
@@ -62,11 +61,14 @@ year.out   = 2000              # Year of measurements
 #------------------------------------------------------------------------------------------#
 #     Plot information.                                                                    #
 #------------------------------------------------------------------------------------------#
-subplot.area    = 10*25   # Area of each subplot (all trees) [m2]
-allplot.area    = 25*25   # Area of each plot    (all large trees) [m2]
-nplots          = 92      # Number of plots
+subplot.area    = 20*20   # Area of each subplot (all trees) [m2]
+allplot.area    = 20*20   # Area of each plot    (all large trees) [m2]
+nplots          = 1250     # Number of plots
 min.dbh.subplot = 10.     # Minimum DBH in the sub-sample
-min.dbh.allplot = 35.     # Minimum DBH for all plot
+min.dbh.allplot = 10.     # Minimum DBH for all plot
+min.dbh.subplot_L = 1.   # Liana minimum DBH in the sub-sample
+min.dbh.allplot_L = 1.   # Liana minimum DBH in the sub-sample
+consider_liana = FALSE
 #------------------------------------------------------------------------------------------#
 
 
@@ -87,7 +89,7 @@ fast.soil.n   = 0.00348  #  Fast soil nitrogen        [kgN/m2]
 #     Set allometric option (not necessary, this is just to make the dummy columns in the  #
 # pss and css files to be consistent).  This has the same meaning as the ED2IN option.     #
 #------------------------------------------------------------------------------------------#
-iallom = 2
+iallom = 3
 #------------------------------------------------------------------------------------------#
 
 #------------------------------------------------------------------------------------------#
@@ -148,16 +150,17 @@ pft       =   read.csv(pft.table,header=TRUE,stringsAsFactors=FALSE)
 pft       =   pft[pft$iallom == iallom,,drop=FALSE]
 pft       =   pft[order(pft$ipft),,drop=FALSE]
 pft       <<- pft
+
+
 #------------------------------------------------------------------------------------------#
 
 
 #----- Read forest inventory data. --------------------------------------------------------#
-census.input = file.path(here,census.csv)
+census.input = file.path(there,census.csv)
 cat(" + Read in the data set (",basename(census.input),").","\n",sep="")
 census    = read.csv(census.input,header=TRUE,stringsAsFactors=FALSE)
 ncohorts  = nrow(census)
 #------------------------------------------------------------------------------------------#
-
 
 
 
@@ -166,9 +169,40 @@ ncohorts  = nrow(census)
 #------------------------------------------------------------------------------------------#
 pft.mid.rho = pft$rho[pft.idx]
 npft        = length(pft.mid.rho)
-pft.brks    = c(-Inf,0.5*(pft.mid.rho[-1]+pft.mid.rho[-npft]),Inf)
+#pft.brks    = c(-Inf,0.5*(pft.mid.rho[-1]+pft.mid.rho[-npft]),Inf)
+#pft.brks    = c(-Inf,(pft.mid.rho[-npft]),Inf)
+pft.brks    = c(-Inf,c(0.45,0.6),Inf)
 pft.cut     = as.numeric(cut(census$wood.dens,pft.brks))
 census$pft  = pft.idx[pft.cut]
+
+if ("is_liana" %in% colnames(census)){
+  
+  if (consider_liana){
+    census$pft[census$is_liana]=17
+    census$keep <- TRUE
+    plots_uni <- unique(census$plots)
+    nplots_tot <- length(plots_uni)
+    for (i in seq(nplots_tot)){
+      if (all(census$pft[census$plots==plots_uni[i]] == 17)){
+        census$keep[census$plots==plots_uni[i]] <- FALSE
+      }
+    }
+  } else {
+    census$keep <- TRUE
+    census$keep[census$is_liana]=FALSE    
+    plots_uni <- unique(census$plots)
+    nplots_tot <- length(plots_uni)
+    for (i in seq(nplots_tot)){
+      if (all(census$pft[census$plots==plots_uni[i]] == 17)){
+        census$keep[census$plots==plots_uni[i]] <- FALSE
+      }
+    }
+    
+  }
+  census <- census[census$keep,]
+  ncohorts <- nrow(census)
+}
+
 #------------------------------------------------------------------------------------------#
 
 
@@ -176,6 +210,10 @@ census$pft  = pft.idx[pft.cut]
 #     Find the demographic density of the individuals.                                     #
 #------------------------------------------------------------------------------------------#
 census$n = with(census, ifelse(dbh < min.dbh.allplot,1/subplot.area,1/allplot.area))
+
+if ("is_liana" %in% colnames(census)){
+  census$n[census$is_liana] =  with(census, ifelse(dbh[census$is_liana] < min.dbh.allplot_L,1/subplot.area,1/allplot.area))
+}
 #------------------------------------------------------------------------------------------#
 
 
@@ -188,6 +226,30 @@ census$balive = with(census,size2ba (dbh=dbh,hgt=height,ipft=pft))
 census$bdead  = with(census,size2bd (dbh=dbh,hgt=height,ipft=pft))
 census$lai    = with(census,size2lai(dbh=dbh,hgt=height,nplant=n,ipft=pft))
 #------------------------------------------------------------------------------------------#
+
+if ("is_liana" %in% colnames(census)){
+  allom=iallom
+  source('~/Documents/R/review_paper/allometry/allom_ed.r')
+  source('~/Documents/R/review_paper/allometry/allom_ed_param.r')
+  is_liana=census$is_liana
+  
+  
+  census$height[is_liana] = sapply(census$dbh[is_liana],function(dbh) dbh2h(dbh,pft,allom,17))
+  
+  if (consider_liana){
+    plot_uni=sort(unique(census$plots))
+    dbh_ths_L=2. # cm
+    delta_z_L=0.2 # m
+    for (i in seq(1,length(plot_uni))){
+      pos = census$plots == plot_uni[i]
+      
+      if (any(pos & !census$is_liana)){
+        tree_max_height = max(census$height[pos & !census$is_liana]) # Tree maximal height in this patch
+        census$height[census$is_liana & pos & census$dbh > dbh_ths_L] = min(tree_max_height+delta_z_L,pft$hgt.max[17])
+      }
+    }
+  }
+}
 
 
 
@@ -228,7 +290,7 @@ cat (" + Create PSS/CSS file.","\n")
                            , hite   = sprintf("%9.3f"  , census$height )
                            , pft    = sprintf("%5i"    , census$pft    )
                            , n      = sprintf("%15.8f" , census$n      )
-                           , bdead  = sprintf("%9.3f"  , census$bdead  )
+                           , bdead  = sprintf("%9.3f"  , rep(0.,times=ncohorts)  )
                            , balive = sprintf("%9.3f"  , census$balive )
                            , lai    = sprintf("%10.4f" , census$lai    )
                            )#end data.frame
@@ -250,26 +312,48 @@ cat (" + Create PSS/CSS file.","\n")
    #---------------------------------------------------------------------------------------#
    #    Format the output so the table is legible.                                         #
    #---------------------------------------------------------------------------------------#
+   
+   
    npatches   = length(unique(census$plots))
-   outpatches = list( time  = sprintf("%4.4i"  ,rep(year.out     ,times=npatches))
-                    , patch = sprintf("0x%3.3X",unique(census$plots))
-                    , trk   = sprintf("%5i"    ,rep(2            ,times=npatches))
-                    , age   = sprintf("%6.1f"  ,rep(0            ,times=npatches))
-                    , area  = sprintf("%9.7f"  ,rep(1/npatches   ,times=npatches))
-                    , water = sprintf("%5i"    ,rep(0            ,times=npatches))
-                    , fsc   = sprintf("%10.5f" ,rep(fast.soil.c  ,times=npatches))
-                    , stsc  = sprintf("%10.5f" ,rep(struct.soil.c,times=npatches))
-                    , stsl  = sprintf("%10.5f" ,rep(struct.soil.l,times=npatches))
-                    , ssc   = sprintf("%10.5f" ,rep(slow.soil.c  ,times=npatches))
-                    , lai   = sprintf("%10.5f" ,with(census,tapply(lai,plots,sum)))
-                    , msn   = sprintf("%10.5f" ,rep(min.soil.n   ,times=npatches))
-                    , fsn   = sprintf("%10.5f" ,rep(fast.soil.n  ,times=npatches))
-                    , nep   = sprintf("%10.5f" ,rep(0            ,times=npatches))
-                    , gpp   = sprintf("%10.5f" ,rep(0            ,times=npatches))
-                    , rh    = sprintf("%10.5f" ,rep(0            ,times=npatches))
-                    )#end data.frame
+   
+   if (IED_INIT_MODE == 6){
+     outpatches = list( time  = sprintf("%4.4i"  ,rep(year.out     ,times=npatches))
+                      , patch = sprintf("0x%3.3X",unique(census$plots))
+                      , trk   = sprintf("%5i"    ,rep(2            ,times=npatches))
+                      , age   = sprintf("%6.1f"  ,rep(0            ,times=npatches))
+                      , area  = sprintf("%9.7f"  ,rep(1/npatches   ,times=npatches))
+                      , water = sprintf("%5i"    ,rep(0            ,times=npatches))
+                      , fsc   = sprintf("%10.5f" ,rep(fast.soil.c  ,times=npatches))
+                      , stsc  = sprintf("%10.5f" ,rep(struct.soil.c,times=npatches))
+                      , stsl  = sprintf("%10.5f" ,rep(struct.soil.l,times=npatches))
+                      , ssc   = sprintf("%10.5f" ,rep(slow.soil.c  ,times=npatches))
+                      , lai   = sprintf("%10.5f" ,with(census,tapply(lai,plots,sum)))
+                      , msn   = sprintf("%10.5f" ,rep(min.soil.n   ,times=npatches))
+                      , fsn   = sprintf("%10.5f" ,rep(fast.soil.n  ,times=npatches))
+                      , nep   = sprintf("%10.5f" ,rep(0            ,times=npatches))
+                      , gpp   = sprintf("%10.5f" ,rep(0            ,times=npatches))
+                      , rh    = sprintf("%10.5f" ,rep(0            ,times=npatches))
+                      )#end data.frame
+   } else if (IED_INIT_MODE == 3){
+     
+     outpatches = list( Site  = sprintf("%5i"      ,rep(1            ,times=npatches))
+                        , time  = sprintf("%4.4i"  ,rep(year.out     ,times=npatches))
+                        , patch = sprintf("0x%3.3X",unique(census$plots))
+                        , trk   = sprintf("%5i"    ,rep(2            ,times=npatches))
+                        , age   = sprintf("%6.1f"  ,rep(0            ,times=npatches))
+                        , area  = sprintf("%9.7f"  ,rep(1/npatches   ,times=npatches))
+                        , water = sprintf("%5i"    ,rep(0            ,times=npatches))
+                        , fsc   = sprintf("%10.5f" ,rep(fast.soil.c  ,times=npatches))
+                        , stsc  = sprintf("%10.5f" ,rep(struct.soil.c,times=npatches))
+                        , stsl  = sprintf("%10.5f" ,rep(struct.soil.l,times=npatches))
+                        , ssc   = sprintf("%10.5f" ,rep(slow.soil.c  ,times=npatches))
+                        , psc   = sprintf("%10.5f" ,rep(0.           ,times=npatches))
+                        , msn   = sprintf("%10.5f" ,rep(min.soil.n   ,times=npatches))
+                        , fsn   = sprintf("%10.5f" ,rep(fast.soil.n  ,times=npatches))
+     )#end data.frame
+   }
    #---------------------------------------------------------------------------------------#
-
+   # Missing psc
 
    #----- Write the patch file. -----------------------------------------------------------#
    dummy   = write.table( x         = outpatches
@@ -281,4 +365,39 @@ cat (" + Create PSS/CSS file.","\n")
                         , col.names = TRUE
                         )#end write.table
    #---------------------------------------------------------------------------------------#
-#------------------------------------------------------------------------------------------#
+   if (IED_INIT_MODE == 3){
+     # write site
+   }
+   #---------------------------------------------------------------------------------------#
+   
+   plot.new()
+   hist(census$pft[!(census$pft==17)])
+   
+   # for (ipft in c(2,3,4)){
+   #  census$height[census$pft==ipft] = sapply(census$dbh[census$pft==ipft],function(dbh) dbh2h(dbh,pft,allom,ipft))
+   # }
+   # Npatches=npatches
+   # maxH_L=maxH_T=minH_L=minH_T=matrix(NA,Npatches)
+   # for (i in seq(1,Npatches)){
+   #   h=census$height[census$plots==i]
+   #   pft=census$pft[census$plots==i]
+   #   if (any(pft==17)){
+   #     maxH_L[i]=max(h[pft==17])
+   #     minH_L[i]=min(h[pft==17])
+   #   }
+   #   if (any(pft!=17)){
+   #     maxH_T[i]=max(h[pft!=17])
+   #     minH_T[i]=min(h[pft!=17])
+   #   }
+   # }
+   # 
+   # plot.new()
+   # par(mar=c(2,2,2,2),mfrow=c(1,2))
+   # plot(seq(1,Npatches),maxH_T,type='p',col='green')
+   # lines(seq(1,Npatches),maxH_L,type='p',col='blue')
+   # 
+   # plot(seq(1,Npatches),minH_L,type='p',col='blue',ylim=c(0,1.1*max(minH_L)))
+   # lines(seq(1,Npatches),minH_T,type='p',col='green')
+   # 
+   
+   #plot(census$dbh[census$pft==17],census$height[census$pft==17]) #,xlim=c(2,10))
